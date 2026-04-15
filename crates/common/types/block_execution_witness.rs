@@ -15,6 +15,12 @@ use ethrex_crypto::{Crypto, NativeCrypto};
 use ethrex_rlp::error::RLPDecodeError;
 use ethrex_rlp::{decode::RLPDecode, encode::RLPEncode};
 use ethrex_trie::{EMPTY_TRIE_HASH, Nibbles, Node, NodeRef, Trie, TrieError};
+#[cfg(feature = "eip-8025")]
+use libssz::{SszDecode, SszEncode};
+#[cfg(feature = "eip-8025")]
+use libssz_derive::{SszDecode as DeriveSszDecode, SszEncode as DeriveSszEncode};
+#[cfg(feature = "eip-8025")]
+use libssz_types::SszList;
 use rkyv::with::{Identity, MapKV};
 use serde::{Deserialize, Serialize};
 
@@ -81,6 +87,149 @@ pub struct ExecutionWitness {
     /// keyed by the keccak256 hash of the account address.
     #[rkyv(with = MapKV<H256Wrapper, Identity>)]
     pub storage_trie_roots: BTreeMap<H256, Node>,
+}
+
+#[cfg(feature = "eip-8025")]
+const MAX_WITNESS_NODES: usize = 1 << 20;
+#[cfg(feature = "eip-8025")]
+const MAX_BYTES_PER_WITNESS_NODE: usize = 1 << 20;
+#[cfg(feature = "eip-8025")]
+// TODO: think about the this constant, did not find this in spec
+const MAX_CHAIN_CONFIG_BYTES: usize = 1 << 20;
+#[cfg(feature = "eip-8025")]
+const MAX_BYTES_PER_CODE: usize = 1 << 24;
+#[cfg(feature = "eip-8025")]
+const MAX_WITNESS_CODES: usize = 1 << 16;
+#[cfg(feature = "eip-8025")]
+const MAX_BYTES_PER_HEADER: usize = 1 << 10;
+#[cfg(feature = "eip-8025")]
+const MAX_WITNESS_HEADERS: usize = 256;
+
+
+#[cfg(feature = "eip-8025")]
+#[derive(Debug, thiserror::Error)]
+pub enum ExecutionWitnessSszError {
+    #[error("invalid SSZ list bounds: {0}")]
+    InvalidSszType(String),
+    #[error("SSZ decode error: {0}")]
+    SszDecode(#[from] libssz::DecodeError),
+    #[error("RLP decode error: {0}")]
+    RlpDecode(#[from] RLPDecodeError),
+    #[error("chain config serde error: {0}")]
+    ChainConfigSerde(#[from] serde_json::Error),
+}
+
+#[cfg(feature = "eip-8025")]
+#[derive(Debug, Clone, DeriveSszEncode, DeriveSszDecode)]
+struct StorageTrieRootSsz {
+    hashed_address: [u8; 32],
+    node_rlp: SszList<u8, MAX_BYTES_PER_WITNESS_NODE>,
+}
+
+#[cfg(feature = "eip-8025")]
+#[derive(Debug, Clone, DeriveSszEncode, DeriveSszDecode)]
+struct ExecutionWitnessSsz {
+    codes: SszList<SszList<u8, MAX_BYTES_PER_CODE>, MAX_WITNESS_CODES>,
+    block_headers_bytes:
+        SszList<SszList<u8, MAX_BYTES_PER_HEADER>, MAX_WITNESS_HEADERS>,
+    first_block_number: u64,
+    chain_config_json: SszList<u8, MAX_CHAIN_CONFIG_BYTES>,
+    state_trie_root_rlp: SszList<u8, MAX_BYTES_PER_WITNESS_NODE>,
+    storage_trie_roots: SszList<StorageTrieRootSsz, MAX_WITNESS_NODES>,
+}
+
+#[cfg(feature = "eip-8025")]
+fn to_ssz_bytes<const MAX: usize>(
+    bytes: Vec<u8>,
+) -> Result<SszList<u8, MAX>, ExecutionWitnessSszError> {
+    SszList::try_from(bytes).map_err(|e| ExecutionWitnessSszError::InvalidSszType(e.to_string()))
+}
+
+#[cfg(feature = "eip-8025")]
+fn to_ssz_vec_vec<const MAX_ITEMS: usize, const MAX_ITEM_BYTES: usize>(
+    items: Vec<Vec<u8>>,
+) -> Result<SszList<SszList<u8, MAX_ITEM_BYTES>, MAX_ITEMS>, ExecutionWitnessSszError> {
+    let mut out = Vec::with_capacity(items.len());
+    for item in items {
+        out.push(
+            SszList::try_from(item)
+                .map_err(|e| ExecutionWitnessSszError::InvalidSszType(e.to_string()))?,
+        );
+    }
+    SszList::try_from(out).map_err(|e| ExecutionWitnessSszError::InvalidSszType(e.to_string()))
+}
+
+#[cfg(feature = "eip-8025")]
+impl ExecutionWitness {
+    pub fn to_ssz_bytes(&self) -> Result<Vec<u8>, ExecutionWitnessSszError> {
+        let state_trie_root_rlp = match &self.state_trie_root {
+            Some(root) => root.encode_to_vec(),
+            None => Vec::new(),
+        };
+
+        let mut storage_entries = Vec::with_capacity(self.storage_trie_roots.len());
+        for (hashed_address, node) in &self.storage_trie_roots {
+            storage_entries.push(StorageTrieRootSsz {
+                hashed_address: *hashed_address.as_fixed_bytes(),
+                node_rlp: to_ssz_bytes::<MAX_BYTES_PER_WITNESS_NODE>(node.encode_to_vec())?,
+            });
+        }
+
+        let ssz_witness = ExecutionWitnessSsz {
+            codes: to_ssz_vec_vec::<MAX_WITNESS_CODES, MAX_BYTES_PER_CODE>(
+                self.codes.clone(),
+            )?,
+            block_headers_bytes:
+                to_ssz_vec_vec::<MAX_WITNESS_HEADERS, MAX_BYTES_PER_HEADER>(
+                    self.block_headers_bytes.clone(),
+                )?,
+            first_block_number: self.first_block_number,
+            chain_config_json: to_ssz_bytes::<MAX_CHAIN_CONFIG_BYTES>(serde_json::to_vec(
+                &self.chain_config,
+            )?)?,
+            state_trie_root_rlp: to_ssz_bytes::<MAX_BYTES_PER_WITNESS_NODE>(
+                state_trie_root_rlp,
+            )?,
+            storage_trie_roots: SszList::try_from(storage_entries)
+                .map_err(|e| ExecutionWitnessSszError::InvalidSszType(e.to_string()))?,
+        };
+
+        Ok(ssz_witness.to_ssz())
+    }
+
+    pub fn from_ssz_bytes(bytes: &[u8]) -> Result<Self, ExecutionWitnessSszError> {
+        let ssz_witness = ExecutionWitnessSsz::from_ssz_bytes(bytes)?;
+
+        let state_trie_root = if ssz_witness.state_trie_root_rlp.is_empty() {
+            None
+        } else {
+            Some(Node::decode(&ssz_witness.state_trie_root_rlp)?)
+        };
+
+        let mut storage_trie_roots = BTreeMap::new();
+        for entry in ssz_witness.storage_trie_roots {
+            let hashed_address = H256::from_slice(&entry.hashed_address);
+            let node = Node::decode(&entry.node_rlp)?;
+            storage_trie_roots.insert(hashed_address, node);
+        }
+
+        Ok(Self {
+            codes: ssz_witness
+                .codes
+                .into_iter()
+                .map(SszList::into_inner)
+                .collect(),
+            block_headers_bytes: ssz_witness
+                .block_headers_bytes
+                .into_iter()
+                .map(SszList::into_inner)
+                .collect(),
+            first_block_number: ssz_witness.first_block_number,
+            chain_config: serde_json::from_slice(&ssz_witness.chain_config_json)?,
+            state_trie_root,
+            storage_trie_roots,
+        })
+    }
 }
 
 /// RPC-friendly representation of an execution witness.
