@@ -7,9 +7,6 @@ use ethrex_common::types::block_execution_witness::ExecutionWitness;
     Default,
     serde::Serialize,
     serde::Deserialize,
-    rkyv::Deserialize,
-    rkyv::Serialize,
-    rkyv::Archive,
 )]
 pub struct ProgramInput {
     /// Blocks to execute.
@@ -28,12 +25,12 @@ impl ProgramInput {
     }
 }
 
-/// Encode a `NewPayloadRequest` (SSZ) and `ExecutionWitness` (rkyv) into the
+/// Encode a `NewPayloadRequest` (SSZ) and `ExecutionWitness` (SSZ) into the
 /// EIP-8025 length-prefixed wire format:
 ///
-///   `[ssz_len: u32 LE] [ssz_bytes] [rkyv_bytes]`
+///   `[ssz_len: u32 LE] [ssz_bytes] [witness_ssz_bytes]`
 ///
-/// Returns an error if rkyv serialization of the execution witness fails.
+/// Returns an error if SSZ serialization of the execution witness fails.
 #[cfg(feature = "eip-8025")]
 pub fn encode_eip8025(
     new_payload_request: &ethrex_common::types::eip8025_ssz::NewPayloadRequest,
@@ -43,13 +40,14 @@ pub fn encode_eip8025(
 
     let ssz_bytes = new_payload_request.to_ssz();
     let ssz_len = ssz_bytes.len() as u32;
-    let rkyv_bytes = rkyv::to_bytes::<rkyv::rancor::Error>(execution_witness)
-        .map_err(|e| ProgramInputEncodeError::Rkyv(e.to_string()))?;
+    let witness_ssz_bytes = execution_witness
+        .to_ssz_bytes()
+        .map_err(ProgramInputEncodeError::WitnessSsz)?;
 
-    let mut out = Vec::with_capacity(4 + ssz_bytes.len() + rkyv_bytes.len());
+    let mut out = Vec::with_capacity(4 + ssz_bytes.len() + witness_ssz_bytes.len());
     out.extend_from_slice(&ssz_len.to_le_bytes());
     out.extend_from_slice(&ssz_bytes);
-    out.extend_from_slice(&rkyv_bytes);
+    out.extend_from_slice(&witness_ssz_bytes);
     Ok(out)
 }
 
@@ -79,13 +77,13 @@ pub fn decode_eip8025(
         return Err(ProgramInputDecodeError::TooShort);
     }
     let ssz_bytes = &bytes[4..4 + ssz_len];
-    let rkyv_bytes = &bytes[4 + ssz_len..];
+    let witness_ssz_bytes = &bytes[4 + ssz_len..];
 
     let new_payload_request =
         ethrex_common::types::eip8025_ssz::NewPayloadRequest::from_ssz_bytes(ssz_bytes)
             .map_err(ProgramInputDecodeError::Ssz)?;
-    let execution_witness = rkyv::from_bytes::<ExecutionWitness, rkyv::rancor::Error>(rkyv_bytes)
-        .map_err(|e| ProgramInputDecodeError::Rkyv(e.to_string()))?;
+    let execution_witness = ExecutionWitness::from_ssz_bytes(witness_ssz_bytes)
+        .map_err(ProgramInputDecodeError::WitnessSsz)?;
 
     Ok((new_payload_request, execution_witness))
 }
@@ -93,14 +91,14 @@ pub fn decode_eip8025(
 #[cfg(feature = "eip-8025")]
 #[derive(Debug)]
 pub enum ProgramInputEncodeError {
-    Rkyv(String),
+    WitnessSsz(ethrex_common::types::block_execution_witness::ExecutionWitnessSszError),
 }
 
 #[cfg(feature = "eip-8025")]
 impl core::fmt::Display for ProgramInputEncodeError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
-            Self::Rkyv(e) => write!(f, "rkyv encode error: {e}"),
+            Self::WitnessSsz(e) => write!(f, "execution witness SSZ encode error: {e}"),
         }
     }
 }
@@ -110,7 +108,7 @@ impl core::fmt::Display for ProgramInputEncodeError {
 pub enum ProgramInputDecodeError {
     TooShort,
     Ssz(libssz::DecodeError),
-    Rkyv(String),
+    WitnessSsz(ethrex_common::types::block_execution_witness::ExecutionWitnessSszError),
 }
 
 #[cfg(feature = "eip-8025")]
@@ -119,7 +117,7 @@ impl core::fmt::Display for ProgramInputDecodeError {
         match self {
             Self::TooShort => write!(f, "input too short"),
             Self::Ssz(e) => write!(f, "SSZ decode error: {e}"),
-            Self::Rkyv(e) => write!(f, "rkyv decode error: {e}"),
+            Self::WitnessSsz(e) => write!(f, "execution witness SSZ decode error: {e}"),
         }
     }
 }

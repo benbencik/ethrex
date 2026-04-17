@@ -2,7 +2,6 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use bytes::Bytes;
 
-use crate::rkyv_utils::H256Wrapper;
 use crate::serde_utils;
 use crate::types::{Block, Code, CodeMetadata};
 use crate::{
@@ -15,7 +14,9 @@ use ethrex_crypto::{Crypto, NativeCrypto};
 use ethrex_rlp::error::RLPDecodeError;
 use ethrex_rlp::{decode::RLPDecode, encode::RLPEncode};
 use ethrex_trie::{EMPTY_TRIE_HASH, Nibbles, Node, NodeRef, Trie, TrieError};
-use rkyv::with::{Identity, MapKV};
+use libssz::{SszDecode, SszEncode};
+use libssz_derive::{SszDecode as DeriveSszDecode, SszEncode as DeriveSszEncode};
+use libssz_types::SszList;
 use serde::{Deserialize, Serialize};
 
 /// State produced by the guest program execution inside the zkVM. It is
@@ -61,15 +62,11 @@ pub struct GuestProgramState {
 ///
 /// It is essentially an `RpcExecutionWitness` but it also contains `ChainConfig`,
 /// and `first_block_number`.
-#[derive(
-    Default, Serialize, Deserialize, rkyv::Serialize, rkyv::Deserialize, rkyv::Archive, Clone,
-)]
+#[derive(Default, Serialize, Deserialize, Clone, Debug)]
 pub struct ExecutionWitness {
     // Contract bytecodes needed for stateless execution.
-    #[rkyv(with = crate::rkyv_utils::VecVecWrapper)]
     pub codes: Vec<Vec<u8>>,
     /// RLP-encoded block headers needed for stateless execution.
-    #[rkyv(with = crate::rkyv_utils::VecVecWrapper)]
     pub block_headers_bytes: Vec<Vec<u8>>,
     /// The block number of the first block
     pub first_block_number: u64,
@@ -79,8 +76,183 @@ pub struct ExecutionWitness {
     pub state_trie_root: Option<Node>,
     /// Root nodes per account storage embedded with the rest of the trie's nodes,
     /// keyed by the keccak256 hash of the account address.
-    #[rkyv(with = MapKV<H256Wrapper, Identity>)]
     pub storage_trie_roots: BTreeMap<H256, Node>,
+}
+
+const MAX_WITNESS_NODES: usize = 1 << 20;
+const MAX_BYTES_PER_WITNESS_NODE: usize = 1 << 20;
+const MAX_CHAIN_CONFIG_BYTES: usize = 1 << 20;
+const MAX_BYTES_PER_CODE: usize = 1 << 24;
+const MAX_WITNESS_CODES: usize = 1 << 16;
+const MAX_BYTES_PER_HEADER: usize = 1 << 12;
+const MAX_WITNESS_HEADERS: usize = 256;
+
+#[derive(Debug, thiserror::Error)]
+pub enum ExecutionWitnessSszError {
+    #[error("invalid SSZ list bounds: {0}")]
+    InvalidSszType(String),
+    #[error("SSZ decode error: {0}")]
+    SszDecode(#[from] libssz::DecodeError),
+    #[error("RLP decode error: {0}")]
+    RlpDecode(#[from] RLPDecodeError),
+    #[error("chain config serde error: {0}")]
+    ChainConfigSerde(#[from] serde_json::Error),
+    #[error("trie error: {0}")]
+    Trie(#[from] TrieError),
+}
+
+#[derive(Debug, Clone, DeriveSszEncode, DeriveSszDecode)]
+struct ExecutionWitnessSsz {
+    codes: SszList<SszList<u8, MAX_BYTES_PER_CODE>, MAX_WITNESS_CODES>,
+    block_headers_bytes: SszList<SszList<u8, MAX_BYTES_PER_HEADER>, MAX_WITNESS_HEADERS>,
+    first_block_number: u64,
+    chain_config_json: SszList<u8, MAX_CHAIN_CONFIG_BYTES>,
+    /// Flat list of RLP-encoded trie nodes (state + storage), same as
+    /// `RpcExecutionWitness.state`. Encoding via `encode_subtrie` preserves
+    /// the full embedded trie; decoding reconstructs it via
+    /// `Trie::get_embedded_root`.
+    state_nodes: SszList<SszList<u8, MAX_BYTES_PER_WITNESS_NODE>, MAX_WITNESS_NODES>,
+}
+
+fn to_ssz_bytes<const MAX: usize>(
+    bytes: Vec<u8>,
+) -> Result<SszList<u8, MAX>, ExecutionWitnessSszError> {
+    SszList::try_from(bytes).map_err(|e| ExecutionWitnessSszError::InvalidSszType(e.to_string()))
+}
+
+fn to_ssz_vec_vec<const MAX_ITEMS: usize, const MAX_ITEM_BYTES: usize>(
+    items: Vec<Vec<u8>>,
+) -> Result<SszList<SszList<u8, MAX_ITEM_BYTES>, MAX_ITEMS>, ExecutionWitnessSszError> {
+    let mut out = Vec::with_capacity(items.len());
+    for item in items {
+        out.push(
+            SszList::try_from(item)
+                .map_err(|e| ExecutionWitnessSszError::InvalidSszType(e.to_string()))?,
+        );
+    }
+    SszList::try_from(out).map_err(|e| ExecutionWitnessSszError::InvalidSszType(e.to_string()))
+}
+
+impl ExecutionWitness {
+    pub fn to_ssz_bytes(&self) -> Result<Vec<u8>, ExecutionWitnessSszError> {
+        // Flatten the embedded trie into a flat list of RLP-encoded nodes,
+        // same representation as RpcExecutionWitness.state.
+        let mut state_node_rlps: Vec<Vec<u8>> = Vec::new();
+        if let Some(root) = &self.state_trie_root {
+            root.encode_subtrie(&mut state_node_rlps)
+                .map_err(|e| ExecutionWitnessSszError::InvalidSszType(e.to_string()))?;
+        }
+        for node in self.storage_trie_roots.values() {
+            node.encode_subtrie(&mut state_node_rlps)
+                .map_err(|e| ExecutionWitnessSszError::InvalidSszType(e.to_string()))?;
+        }
+
+        let ssz_witness = ExecutionWitnessSsz {
+            codes: to_ssz_vec_vec::<MAX_WITNESS_CODES, MAX_BYTES_PER_CODE>(self.codes.clone())?,
+            block_headers_bytes: to_ssz_vec_vec::<MAX_WITNESS_HEADERS, MAX_BYTES_PER_HEADER>(
+                self.block_headers_bytes.clone(),
+            )?,
+            first_block_number: self.first_block_number,
+            chain_config_json: to_ssz_bytes::<MAX_CHAIN_CONFIG_BYTES>(serde_json::to_vec(
+                &self.chain_config,
+            )?)?,
+            state_nodes: to_ssz_vec_vec::<MAX_WITNESS_NODES, MAX_BYTES_PER_WITNESS_NODE>(
+                state_node_rlps,
+            )?,
+        };
+
+        Ok(ssz_witness.to_ssz())
+    }
+
+    pub fn from_ssz_bytes(bytes: &[u8]) -> Result<Self, ExecutionWitnessSszError> {
+        let ssz_witness = ExecutionWitnessSsz::from_ssz_bytes(bytes)?;
+
+        let chain_config: ChainConfig =
+            serde_json::from_slice(&ssz_witness.chain_config_json)?;
+
+        // Reconstruct the RpcExecutionWitness-style flat node map.
+        let nodes: BTreeMap<H256, Node> = ssz_witness
+            .state_nodes
+            .into_iter()
+            .map(|node_rlp| {
+                let rlp_bytes = node_rlp.into_inner();
+                let hash = keccak(&rlp_bytes);
+                Node::decode(&rlp_bytes).map(|node| (hash, node))
+            })
+            .collect::<Result<_, RLPDecodeError>>()?;
+
+        // Find the initial state root hash from block headers.
+        let block_headers_bytes: Vec<Vec<u8>> = ssz_witness
+            .block_headers_bytes
+            .into_iter()
+            .map(SszList::into_inner)
+            .collect();
+
+        let mut initial_state_root = None;
+        for h in &block_headers_bytes {
+            let header = BlockHeader::decode(h)?;
+            if header.number == ssz_witness.first_block_number - 1 {
+                initial_state_root = Some(header.state_root);
+                break;
+            }
+        }
+
+        let initial_state_root = initial_state_root.ok_or_else(|| {
+            ExecutionWitnessSszError::InvalidSszType(format!(
+                "header for block {} not found",
+                ssz_witness.first_block_number - 1
+            ))
+        })?;
+
+        // Rebuild embedded state trie from flat nodes.
+        let state_trie_root =
+            if let NodeRef::Node(state_trie_root, _) =
+                Trie::get_embedded_root(&nodes, initial_state_root)
+                    .map_err(|e| ExecutionWitnessSszError::InvalidSszType(e.to_string()))?
+            {
+                Some((*state_trie_root).clone())
+            } else {
+                None
+            };
+
+        // Rebuild storage trie roots by walking accounts.
+        let mut storage_trie_roots = BTreeMap::new();
+        if let Some(state_trie_root) = &state_trie_root {
+            let mut accounts = Vec::new();
+            collect_accounts_from_trie(
+                state_trie_root,
+                Nibbles::from_raw(&[], false),
+                &mut accounts,
+                &nodes,
+            );
+
+            for (hashed_address, storage_root_hash) in accounts {
+                if storage_root_hash == *EMPTY_TRIE_HASH {
+                    continue;
+                }
+                if !nodes.contains_key(&storage_root_hash) {
+                    continue;
+                }
+                let node = Trie::get_embedded_root(&nodes, storage_root_hash)
+                    .map_err(|e| ExecutionWitnessSszError::InvalidSszType(e.to_string()))?;
+                let NodeRef::Node(node, _) = node else {
+                    return Err(ExecutionWitnessSszError::InvalidSszType(
+                        "execution witness does not contain non-empty storage trie".to_string(),
+                    ));
+                };
+                storage_trie_roots.insert(hashed_address, (*node).clone());
+            }
+        }
+
+        Ok(Self {
+            codes: ssz_witness.codes.into_iter().map(SszList::into_inner).collect(),
+            block_headers_bytes,
+            first_block_number: ssz_witness.first_block_number,
+            chain_config,
+            state_trie_root,
+            storage_trie_roots,
+        })
+    }
 }
 
 /// RPC-friendly representation of an execution witness.

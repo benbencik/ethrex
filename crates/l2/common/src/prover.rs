@@ -1,7 +1,6 @@
 use ethrex_common::types::{
     Block, blobs_bundle, block_execution_witness::ExecutionWitness, fee_config::FeeConfig,
 };
-use rkyv::{Archive, Deserialize as RDeserialize, Serialize as RSerialize};
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 
@@ -24,7 +23,7 @@ pub fn verifier_getter(prover_type: ProverType) -> Option<&'static str> {
 }
 
 #[serde_as]
-#[derive(Serialize, Deserialize, RDeserialize, RSerialize, Archive)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct ProverInputData {
     pub blocks: Vec<Block>,
     pub execution_witness: ExecutionWitness,
