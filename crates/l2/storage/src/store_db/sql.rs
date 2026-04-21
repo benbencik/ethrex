@@ -378,9 +378,11 @@ impl SQLStore {
         prover_input: ProverInputData,
         db_tx: Option<&Transaction>,
     ) -> Result<(), RollupStoreError> {
-        let prover_input_bytes = bincode::serialize(&prover_input).map_err(|e| {
-            RollupStoreError::Custom(format!("Failed to serialize prover input: {e}"))
-        })?;
+        let prover_input_bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&prover_input)
+            .map_err(|e| {
+                RollupStoreError::Custom(format!("Failed to serialize prover input: {e}"))
+            })?
+            .to_vec();
 
         let queries = vec![(
             "INSERT OR REPLACE INTO batch_prover_input VALUES (?1, ?2, ?3)",
@@ -1086,11 +1088,12 @@ impl StoreEngineRollup for SQLStore {
         if let Some(row) = rows.next().await? {
             let vec = read_from_row_blob(&row, 0)?;
 
-            let prover_input = bincode::deserialize::<ProverInputData>(&vec).map_err(|e| {
-                RollupStoreError::Custom(format!(
-                    "Failed to deserialize prover input for batch {batch_number} and version {prover_version}: {e}",
-                ))
-            })?;
+            let prover_input = rkyv::from_bytes::<ProverInputData, rkyv::rancor::Error>(&vec)
+                .map_err(|e| {
+                    RollupStoreError::Custom(format!(
+                        "Failed to deserialize prover input for batch {batch_number} and version {prover_version}: {e}",
+                    ))
+                })?;
 
             return Ok(Some(prover_input));
         }

@@ -4400,6 +4400,7 @@ dependencies = [
  "ethrex-l2-common",
  "futures",
  "libsql",
+ "rkyv",
  "thiserror 2.0.18",
  "tokio",
  "tracing",

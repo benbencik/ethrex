@@ -433,9 +433,9 @@ impl StoreEngineRollup for Store {
         prover_version: &str,
         prover_input: ProverInputData,
     ) -> Result<(), RollupStoreError> {
-        let witness_bytes = bincode::serialize(&prover_input).map_err(|e| {
-            RollupStoreError::Custom(format!("Failed to serialize prover input: {e}"))
-        })?;
+        let witness_bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&prover_input)
+            .map_err(|e| RollupStoreError::Custom(format!("Failed to serialize witness: {}", e)))?
+            .to_vec();
 
         self.inner()?
             .batch_prover_input
@@ -458,11 +458,12 @@ impl StoreEngineRollup for Store {
             return Ok(None);
         };
 
-        let prover_input = bincode::deserialize::<ProverInputData>(&witness_bytes).map_err(|e| {
-            RollupStoreError::Custom(format!(
-                "Failed to deserialize prover input for batch {batch_number} and version {prover_version}: {e}",
-            ))
-        })?;
+        let prover_input = rkyv::from_bytes::<ProverInputData, rkyv::rancor::Error>(&witness_bytes)
+            .map_err(|e| {
+                RollupStoreError::Custom(format!(
+                    "Failed to deserialize prover input for batch {batch_number} and version {prover_version}: {e}",
+                ))
+            })?;
 
         Ok(Some(prover_input))
     }
