@@ -2,12 +2,7 @@ use ethrex_common::types::Block;
 use ethrex_common::types::block_execution_witness::ExecutionWitness;
 
 /// Input for the L1 stateless validation program.
-#[derive(
-    Clone,
-    Default,
-    serde::Serialize,
-    serde::Deserialize,
-)]
+#[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct ProgramInput {
     /// Blocks to execute.
     pub blocks: Vec<Block>,

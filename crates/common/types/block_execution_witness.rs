@@ -277,7 +277,11 @@ impl ExecutionWitness {
         }
 
         Ok(Self {
-            codes: ssz_witness.codes.into_iter().map(SszList::into_inner).collect(),
+            codes: ssz_witness
+                .codes
+                .into_iter()
+                .map(SszList::into_inner)
+                .collect(),
             block_headers_bytes,
             first_block_number: ssz_witness.first_block_number,
             chain_config,
@@ -493,8 +497,6 @@ fn collect_accounts_from_trie(
         }
     }
 }
-
-
 
 #[derive(thiserror::Error, Debug)]
 pub enum GuestProgramStateError {
