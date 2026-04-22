@@ -110,31 +110,16 @@ pub enum ExecutionWitnessSszError {
     Trie(#[from] TrieError),
 }
 
-/// Maps a hashed account address to storage trie root hash
-/// hashes are precomputed by the host
-#[derive(Debug, Clone, DeriveSszEncode, DeriveSszDecode)]
-struct StorageTrieRootEntrySsz {
-    hashed_address: [u8; 32],
-    storage_root_hash: [u8; 32],
-}
-
-/// `node_hash` is hashed `node_rlp` precomputed by the host
-#[derive(Debug, Clone, DeriveSszEncode, DeriveSszDecode)]
-struct WitnessNodeEntrySsz {
-    node_hash: [u8; 32],
-    node_rlp: SszList<u8, MAX_BYTES_PER_WITNESS_NODE>,
-}
-
-/// SSZ format for `ExecutionWitness`, used by host zkVM guest
+/// SSZ format for `ExecutionWitness`
 #[derive(Debug, DeriveSszEncode, DeriveSszDecode)]
-struct ExecutionWitnessSszContainer {
+struct SszExecutionWitness {
     codes: SszList<SszList<u8, MAX_BYTES_PER_CODE>, MAX_WITNESS_CODES>,
     block_headers_bytes: SszList<SszList<u8, MAX_BYTES_PER_HEADER>, MAX_WITNESS_HEADERS>,
     first_block_number: u64,
     chain_config_bytes: SszList<u8, MAX_CHAIN_CONFIG_BYTES>,
     initial_state_root_hash: [u8; 32],
-    storage_trie_roots: SszList<StorageTrieRootEntrySsz, MAX_STORAGE_TRIE_ROOTS>,
-    state_nodes: SszList<WitnessNodeEntrySsz, MAX_WITNESS_NODES>,
+    storage_trie_root_addresses: SszList<[u8; 32], MAX_STORAGE_TRIE_ROOTS>,
+    state_nodes: SszList<SszList<u8, MAX_BYTES_PER_WITNESS_NODE>, MAX_WITNESS_NODES>,
 }
 
 fn to_ssz_bytes<const MAX: usize>(
@@ -188,13 +173,9 @@ impl ExecutionWitness {
             node.encode_subtrie(&mut state_node_rlps)
                 .map_err(|e| ExecutionWitnessSszError::InvalidSszType(e.to_string()))?;
         }
-        let mut state_nodes = Vec::with_capacity(state_node_rlps.len());
-        for node_rlp in state_node_rlps {
-            state_nodes.push(WitnessNodeEntrySsz {
-                node_hash: keccak(&node_rlp).0,
-                node_rlp: to_ssz_bytes::<MAX_BYTES_PER_WITNESS_NODE>(node_rlp)?,
-            });
-        }
+        let state_nodes = to_ssz_vec_vec::<MAX_WITNESS_NODES, MAX_BYTES_PER_WITNESS_NODE>(
+            state_node_rlps,
+        )?;
 
         let initial_state_root_hash = self
             .state_trie_root
@@ -202,18 +183,11 @@ impl ExecutionWitness {
             .map(|node| node.compute_hash(&NativeCrypto).finalize(&NativeCrypto))
             .unwrap_or(*EMPTY_TRIE_HASH);
 
-        let mut storage_root_entries = Vec::with_capacity(self.storage_trie_roots.len());
-        for (hashed_address, storage_root_node) in &self.storage_trie_roots {
-            storage_root_entries.push(StorageTrieRootEntrySsz {
-                hashed_address: hashed_address.0,
-                storage_root_hash: storage_root_node
-                    .compute_hash(&NativeCrypto)
-                    .finalize(&NativeCrypto)
-                    .0,
-            });
-        }
+        let storage_trie_root_addresses = to_ssz_list::<[u8; 32], MAX_STORAGE_TRIE_ROOTS>(
+            self.storage_trie_roots.keys().map(|hashed_address| hashed_address.0).collect(),
+        )?;
 
-        let ssz = ExecutionWitnessSszContainer {
+        let ssz = SszExecutionWitness {
             codes: to_ssz_vec_vec::<MAX_WITNESS_CODES, MAX_BYTES_PER_CODE>(self.codes.clone())?,
             block_headers_bytes: to_ssz_vec_vec::<MAX_WITNESS_HEADERS, MAX_BYTES_PER_HEADER>(
                 self.block_headers_bytes.clone(),
@@ -223,25 +197,23 @@ impl ExecutionWitness {
                 self.chain_config.encode_bytes(),
             )?,
             initial_state_root_hash: initial_state_root_hash.0,
-            storage_trie_roots: to_ssz_list::<StorageTrieRootEntrySsz, MAX_STORAGE_TRIE_ROOTS>(
-                storage_root_entries,
-            )?,
-            state_nodes: to_ssz_list::<WitnessNodeEntrySsz, MAX_WITNESS_NODES>(state_nodes)?,
+            storage_trie_root_addresses,
+            state_nodes,
         };
         Ok(ssz.to_ssz())
     }
 
     pub fn from_ssz_bytes(bytes: &[u8]) -> Result<Self, ExecutionWitnessSszError> {
-        let ssz_witness = ExecutionWitnessSszContainer::from_ssz_bytes(bytes)?;
+        let ssz_witness = SszExecutionWitness::from_ssz_bytes(bytes)?;
 
         let chain_config = ChainConfig::decode_bytes(&ssz_witness.chain_config_bytes)
             .map_err(ExecutionWitnessSszError::ChainConfig)?;
         let nodes: BTreeMap<H256, Node> = ssz_witness
             .state_nodes
             .into_iter()
-            .map(|entry| {
-                let rlp_bytes = entry.node_rlp.into_inner();
-                let hash = H256(entry.node_hash);
+            .map(|node_rlp| {
+                let rlp_bytes = node_rlp.into_inner();
+                let hash = keccak(&rlp_bytes);
                 Node::decode(&rlp_bytes).map(|node| (hash, node))
             })
             .collect::<Result<_, RLPDecodeError>>()?;
@@ -256,11 +228,34 @@ impl ExecutionWitness {
                 .map_err(|e| ExecutionWitnessSszError::InvalidSszType(e.to_string()))?,
             "execution witness does not contain non-empty state trie",
         )?;
+        let state_trie = match &state_trie_root {
+            Some(root) => Some(Trie::new_temp_with_root(root.clone().into())),
+            None => None,
+        };
 
         let mut storage_trie_roots = BTreeMap::new();
-        for entry in ssz_witness.storage_trie_roots {
-            let hashed_address = H256(entry.hashed_address);
-            let storage_root_hash = H256(entry.storage_root_hash);
+        for hashed_address in ssz_witness.storage_trie_root_addresses {
+            let hashed_address = H256(hashed_address);
+            let storage_root_hash = match &state_trie {
+                Some(state_trie) => {
+                    let encoded_account_state = state_trie
+                        .get(hashed_address.as_bytes())
+                        .map_err(|e| ExecutionWitnessSszError::InvalidSszType(e.to_string()))?
+                        .ok_or_else(|| {
+                            ExecutionWitnessSszError::InvalidSszType(
+                                "execution witness is missing storage root account in state trie"
+                                    .to_string(),
+                            )
+                        })?;
+                    AccountState::decode(&encoded_account_state)?.storage_root
+                }
+                None => {
+                    return Err(ExecutionWitnessSszError::InvalidSszType(
+                        "execution witness contains storage tries but state trie is empty"
+                            .to_string(),
+                    ));
+                }
+            };
             if storage_root_hash == *EMPTY_TRIE_HASH {
                 continue;
             }
