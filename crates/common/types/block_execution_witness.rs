@@ -203,7 +203,10 @@ impl ExecutionWitness {
         Ok(ssz.to_ssz())
     }
 
-    pub fn from_ssz_bytes(bytes: &[u8]) -> Result<Self, ExecutionWitnessSszError> {
+    pub fn from_ssz_bytes(
+        bytes: &[u8],
+        crypto: &dyn Crypto,
+    ) -> Result<Self, ExecutionWitnessSszError> {
         let ssz_witness = SszExecutionWitness::from_ssz_bytes(bytes)?;
 
         let chain_config = ChainConfig::decode_bytes(&ssz_witness.chain_config_bytes)
@@ -213,7 +216,7 @@ impl ExecutionWitness {
             .into_iter()
             .map(|node_rlp| {
                 let rlp_bytes = node_rlp.into_inner();
-                let hash = keccak(&rlp_bytes);
+                let hash = H256(crypto.keccak256(&rlp_bytes));
                 Node::decode(&rlp_bytes).map(|node| (hash, node))
             })
             .collect::<Result<_, RLPDecodeError>>()?;
