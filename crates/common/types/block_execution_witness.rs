@@ -104,8 +104,8 @@ pub enum ExecutionWitnessSszError {
     SszDecode(#[from] libssz::DecodeError),
     #[error("RLP decode error: {0}")]
     RlpDecode(#[from] RLPDecodeError),
-    #[error("chain config serde error: {0}")]
-    ChainConfigSerde(#[from] serde_json::Error),
+    #[error("chain config error: {0}")]
+    ChainConfig(String),
     #[error("trie error: {0}")]
     Trie(#[from] TrieError),
 }
@@ -131,7 +131,7 @@ struct ExecutionWitnessSszContainer {
     codes: SszList<SszList<u8, MAX_BYTES_PER_CODE>, MAX_WITNESS_CODES>,
     block_headers_bytes: SszList<SszList<u8, MAX_BYTES_PER_HEADER>, MAX_WITNESS_HEADERS>,
     first_block_number: u64,
-    chain_config_json: SszList<u8, MAX_CHAIN_CONFIG_BYTES>,
+    chain_config_bytes: SszList<u8, MAX_CHAIN_CONFIG_BYTES>,
     initial_state_root_hash: [u8; 32],
     storage_trie_roots: SszList<StorageTrieRootEntrySsz, MAX_STORAGE_TRIE_ROOTS>,
     state_nodes: SszList<WitnessNodeEntrySsz, MAX_WITNESS_NODES>,
@@ -219,9 +219,9 @@ impl ExecutionWitness {
                 self.block_headers_bytes.clone(),
             )?,
             first_block_number: self.first_block_number,
-            chain_config_json: to_ssz_bytes::<MAX_CHAIN_CONFIG_BYTES>(serde_json::to_vec(
-                &self.chain_config,
-            )?)?,
+            chain_config_bytes: to_ssz_bytes::<MAX_CHAIN_CONFIG_BYTES>(
+                self.chain_config.encode_bytes(),
+            )?,
             initial_state_root_hash: initial_state_root_hash.0,
             storage_trie_roots: to_ssz_list::<StorageTrieRootEntrySsz, MAX_STORAGE_TRIE_ROOTS>(
                 storage_root_entries,
@@ -234,7 +234,8 @@ impl ExecutionWitness {
     pub fn from_ssz_bytes(bytes: &[u8]) -> Result<Self, ExecutionWitnessSszError> {
         let ssz_witness = ExecutionWitnessSszContainer::from_ssz_bytes(bytes)?;
 
-        let chain_config: ChainConfig = serde_json::from_slice(&ssz_witness.chain_config_json)?;
+        let chain_config = ChainConfig::decode_bytes(&ssz_witness.chain_config_bytes)
+            .map_err(ExecutionWitnessSszError::ChainConfig)?;
         let nodes: BTreeMap<H256, Node> = ssz_witness
             .state_nodes
             .into_iter()

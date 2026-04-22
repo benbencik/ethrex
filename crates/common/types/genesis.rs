@@ -661,6 +661,222 @@ impl ChainConfig {
 
         (block_number_based_forks, timestamp_based_forks)
     }
+
+    /// Encode ChainConfig as flat bytes this is done manually because libssz does
+    /// no seem to support option types
+    ///
+    /// Option<u64>: 1 byte (0=None, 1=Some) + 8 bytes
+    /// Option<u128>: 1 byte + 16 bytes
+    /// bool: 1 byte
+    /// address: 20 bytes
+    /// Option<ForkBlobSchedule>: 1 byte + 16 bytes (u64+u32+u32)
+    pub fn encode_bytes(&self) -> Vec<u8> {
+        let mut buf = Vec::with_capacity(512);
+
+        fn push_u64(buf: &mut Vec<u8>, v: u64) {
+            buf.extend_from_slice(&v.to_le_bytes());
+        }
+        fn push_opt_u64(buf: &mut Vec<u8>, v: Option<u64>) {
+            match v {
+                Some(val) => {
+                    buf.push(1);
+                    push_u64(buf, val);
+                }
+                None => {
+                    buf.push(0);
+                    push_u64(buf, 0);
+                }
+            }
+        }
+        fn push_opt_u128(buf: &mut Vec<u8>, v: Option<u128>) {
+            match v {
+                Some(val) => {
+                    buf.push(1);
+                    buf.extend_from_slice(&val.to_le_bytes());
+                }
+                None => {
+                    buf.push(0);
+                    buf.extend_from_slice(&0u128.to_le_bytes());
+                }
+            }
+        }
+        fn push_bool(buf: &mut Vec<u8>, v: bool) {
+            buf.push(v as u8);
+        }
+        fn push_fork_blob(buf: &mut Vec<u8>, s: &ForkBlobSchedule) {
+            push_u64(buf, s.base_fee_update_fraction);
+            buf.extend_from_slice(&s.max.to_le_bytes());
+            buf.extend_from_slice(&s.target.to_le_bytes());
+        }
+        fn push_opt_fork_blob(buf: &mut Vec<u8>, s: &Option<ForkBlobSchedule>) {
+            match s {
+                Some(s) => {
+                    buf.push(1);
+                    push_fork_blob(buf, s);
+                }
+                None => {
+                    buf.push(0);
+                    push_fork_blob(buf, &ForkBlobSchedule::default());
+                }
+            }
+        }
+
+        push_u64(&mut buf, self.chain_id);
+        push_opt_u64(&mut buf, self.homestead_block);
+        push_opt_u64(&mut buf, self.dao_fork_block);
+        push_bool(&mut buf, self.dao_fork_support);
+        push_opt_u64(&mut buf, self.eip150_block);
+        push_opt_u64(&mut buf, self.eip155_block);
+        push_opt_u64(&mut buf, self.eip158_block);
+        push_opt_u64(&mut buf, self.byzantium_block);
+        push_opt_u64(&mut buf, self.constantinople_block);
+        push_opt_u64(&mut buf, self.petersburg_block);
+        push_opt_u64(&mut buf, self.istanbul_block);
+        push_opt_u64(&mut buf, self.muir_glacier_block);
+        push_opt_u64(&mut buf, self.berlin_block);
+        push_opt_u64(&mut buf, self.london_block);
+        push_opt_u64(&mut buf, self.arrow_glacier_block);
+        push_opt_u64(&mut buf, self.gray_glacier_block);
+        push_opt_u64(&mut buf, self.merge_netsplit_block);
+        push_opt_u64(&mut buf, self.shanghai_time);
+        push_opt_u64(&mut buf, self.cancun_time);
+        push_opt_u64(&mut buf, self.prague_time);
+        push_opt_u64(&mut buf, self.verkle_time);
+        push_opt_u64(&mut buf, self.osaka_time);
+        push_opt_u64(&mut buf, self.bpo1_time);
+        push_opt_u64(&mut buf, self.bpo2_time);
+        push_opt_u64(&mut buf, self.bpo3_time);
+        push_opt_u64(&mut buf, self.bpo4_time);
+        push_opt_u64(&mut buf, self.bpo5_time);
+        push_opt_u64(&mut buf, self.amsterdam_time);
+        push_opt_u128(&mut buf, self.terminal_total_difficulty);
+        push_bool(&mut buf, self.terminal_total_difficulty_passed);
+        push_fork_blob(&mut buf, &self.blob_schedule.cancun);
+        push_fork_blob(&mut buf, &self.blob_schedule.prague);
+        push_fork_blob(&mut buf, &self.blob_schedule.osaka);
+        push_fork_blob(&mut buf, &self.blob_schedule.bpo1);
+        push_fork_blob(&mut buf, &self.blob_schedule.bpo2);
+        push_opt_fork_blob(&mut buf, &self.blob_schedule.bpo3);
+        push_opt_fork_blob(&mut buf, &self.blob_schedule.bpo4);
+        push_opt_fork_blob(&mut buf, &self.blob_schedule.bpo5);
+        push_opt_fork_blob(&mut buf, &self.blob_schedule.amsterdam);
+        buf.extend_from_slice(self.deposit_contract_address.as_bytes());
+        push_bool(&mut buf, self.enable_verkle_at_genesis);
+
+        buf
+    }
+
+    /// Decode ChainConfig from flat bytes produced by `encode_bytes`.
+    pub fn decode_bytes(data: &[u8]) -> Result<Self, String> {
+        let mut pos = 0;
+
+        fn read_u64(data: &[u8], pos: &mut usize) -> Result<u64, String> {
+            if *pos + 8 > data.len() {
+                return Err("unexpected end of chain config bytes".into());
+            }
+            let v = u64::from_le_bytes(data[*pos..*pos + 8].try_into().unwrap());
+            *pos += 8;
+            Ok(v)
+        }
+        fn read_u32(data: &[u8], pos: &mut usize) -> Result<u32, String> {
+            if *pos + 4 > data.len() {
+                return Err("unexpected end of chain config bytes".into());
+            }
+            let v = u32::from_le_bytes(data[*pos..*pos + 4].try_into().unwrap());
+            *pos += 4;
+            Ok(v)
+        }
+        fn read_bool(data: &[u8], pos: &mut usize) -> Result<bool, String> {
+            if *pos >= data.len() {
+                return Err("unexpected end of chain config bytes".into());
+            }
+            let v = data[*pos] != 0;
+            *pos += 1;
+            Ok(v)
+        }
+        fn read_opt_u64(data: &[u8], pos: &mut usize) -> Result<Option<u64>, String> {
+            let present = read_bool(data, pos)?;
+            let val = read_u64(data, pos)?;
+            Ok(if present { Some(val) } else { None })
+        }
+        fn read_opt_u128(data: &[u8], pos: &mut usize) -> Result<Option<u128>, String> {
+            let present = read_bool(data, pos)?;
+            if *pos + 16 > data.len() {
+                return Err("unexpected end of chain config bytes".into());
+            }
+            let v = u128::from_le_bytes(data[*pos..*pos + 16].try_into().unwrap());
+            *pos += 16;
+            Ok(if present { Some(v) } else { None })
+        }
+        fn read_fork_blob(data: &[u8], pos: &mut usize) -> Result<ForkBlobSchedule, String> {
+            Ok(ForkBlobSchedule {
+                base_fee_update_fraction: read_u64(data, pos)?,
+                max: read_u32(data, pos)?,
+                target: read_u32(data, pos)?,
+            })
+        }
+        fn read_opt_fork_blob(
+            data: &[u8],
+            pos: &mut usize,
+        ) -> Result<Option<ForkBlobSchedule>, String> {
+            let present = read_bool(data, pos)?;
+            let s = read_fork_blob(data, pos)?;
+            Ok(if present { Some(s) } else { None })
+        }
+
+        Ok(ChainConfig {
+            chain_id: read_u64(data, &mut pos)?,
+            homestead_block: read_opt_u64(data, &mut pos)?,
+            dao_fork_block: read_opt_u64(data, &mut pos)?,
+            dao_fork_support: read_bool(data, &mut pos)?,
+            eip150_block: read_opt_u64(data, &mut pos)?,
+            eip155_block: read_opt_u64(data, &mut pos)?,
+            eip158_block: read_opt_u64(data, &mut pos)?,
+            byzantium_block: read_opt_u64(data, &mut pos)?,
+            constantinople_block: read_opt_u64(data, &mut pos)?,
+            petersburg_block: read_opt_u64(data, &mut pos)?,
+            istanbul_block: read_opt_u64(data, &mut pos)?,
+            muir_glacier_block: read_opt_u64(data, &mut pos)?,
+            berlin_block: read_opt_u64(data, &mut pos)?,
+            london_block: read_opt_u64(data, &mut pos)?,
+            arrow_glacier_block: read_opt_u64(data, &mut pos)?,
+            gray_glacier_block: read_opt_u64(data, &mut pos)?,
+            merge_netsplit_block: read_opt_u64(data, &mut pos)?,
+            shanghai_time: read_opt_u64(data, &mut pos)?,
+            cancun_time: read_opt_u64(data, &mut pos)?,
+            prague_time: read_opt_u64(data, &mut pos)?,
+            verkle_time: read_opt_u64(data, &mut pos)?,
+            osaka_time: read_opt_u64(data, &mut pos)?,
+            bpo1_time: read_opt_u64(data, &mut pos)?,
+            bpo2_time: read_opt_u64(data, &mut pos)?,
+            bpo3_time: read_opt_u64(data, &mut pos)?,
+            bpo4_time: read_opt_u64(data, &mut pos)?,
+            bpo5_time: read_opt_u64(data, &mut pos)?,
+            amsterdam_time: read_opt_u64(data, &mut pos)?,
+            terminal_total_difficulty: read_opt_u128(data, &mut pos)?,
+            terminal_total_difficulty_passed: read_bool(data, &mut pos)?,
+            blob_schedule: BlobSchedule {
+                cancun: read_fork_blob(data, &mut pos)?,
+                prague: read_fork_blob(data, &mut pos)?,
+                osaka: read_fork_blob(data, &mut pos)?,
+                bpo1: read_fork_blob(data, &mut pos)?,
+                bpo2: read_fork_blob(data, &mut pos)?,
+                bpo3: read_opt_fork_blob(data, &mut pos)?,
+                bpo4: read_opt_fork_blob(data, &mut pos)?,
+                bpo5: read_opt_fork_blob(data, &mut pos)?,
+                amsterdam: read_opt_fork_blob(data, &mut pos)?,
+            },
+            deposit_contract_address: {
+                if pos + 20 > data.len() {
+                    return Err("unexpected end of chain config bytes".into());
+                }
+                let addr = Address::from_slice(&data[pos..pos + 20]);
+                pos += 20;
+                addr
+            },
+            enable_verkle_at_genesis: read_bool(data, &mut pos)?,
+        })
+    }
 }
 
 #[allow(unused)]
