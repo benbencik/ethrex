@@ -54,6 +54,19 @@ pub fn execution_program(
     })
 }
 
+/// Decode the EIP-8025 wire-format bytes and execute
+/// Required by `ere-guests` 
+#[cfg(feature = "eip-8025")]
+pub fn execution_program_eip8025_bytes(
+    bytes: &[u8],
+    crypto: Arc<dyn Crypto>,
+) -> Result<ProgramOutput, ExecutionError> {
+    let (new_payload_request, execution_witness) =
+        crate::l1::decode_eip8025(bytes, crypto.as_ref())
+            .map_err(|e| ExecutionError::Internal(format!("EIP-8025 decode: {e}")))?;
+    execution_program(new_payload_request, execution_witness, crypto)
+}
+
 /// Execute the L1 stateless validation program (EIP-8025).
 ///
 /// This transforms the SSZ `NewPayloadRequest` into a `Block`, validates it,
