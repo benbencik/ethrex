@@ -54,6 +54,7 @@ pub fn encode_eip8025(
 #[cfg(feature = "eip-8025")]
 pub fn decode_eip8025(
     bytes: &[u8],
+    crypto: &dyn ethrex_crypto::Crypto,
 ) -> Result<
     (
         ethrex_common::types::eip8025_ssz::NewPayloadRequest,
@@ -77,7 +78,7 @@ pub fn decode_eip8025(
     let new_payload_request =
         ethrex_common::types::eip8025_ssz::NewPayloadRequest::from_ssz_bytes(ssz_bytes)
             .map_err(ProgramInputDecodeError::Ssz)?;
-    let execution_witness = ExecutionWitness::from_ssz_bytes(witness_ssz_bytes)
+    let execution_witness = ExecutionWitness::from_ssz_bytes(witness_ssz_bytes, crypto)
         .map_err(ProgramInputDecodeError::WitnessSsz)?;
 
     Ok((new_payload_request, execution_witness))

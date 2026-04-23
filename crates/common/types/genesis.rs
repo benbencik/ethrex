@@ -670,6 +670,7 @@ impl ChainConfig {
     /// bool: 1 byte
     /// address: 20 bytes
     /// Option<ForkBlobSchedule>: 1 byte + 16 bytes (u64+u32+u32)
+    #[cfg(feature = "eip-8025")]
     pub fn encode_bytes(&self) -> Vec<u8> {
         let mut buf = Vec::with_capacity(512);
 
@@ -767,6 +768,7 @@ impl ChainConfig {
     }
 
     /// Decode ChainConfig from flat bytes produced by `encode_bytes`.
+    #[cfg(feature = "eip-8025")]
     pub fn decode_bytes(data: &[u8]) -> Result<Self, String> {
         let mut pos = 0;
 
