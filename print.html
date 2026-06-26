@@ -35,7 +35,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-81e7760f.js";
+            window.path_to_searchindex_js = "searchindex-ae0fb792.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-7e7556e2.js"></script>
@@ -8962,7 +8962,7 @@ This eliminates code duplication and makes adding new database backends trivial.
 <p>These are the official execution spec tests. There are two kinds: <code>state tests</code> and <code>blockchain tests</code>, you can execute them with:</p>
 <h3 id="state-tests"><a class="header" href="#state-tests">State tests</a></h3>
 <p>The state tests are individual transactions not related one to each other that test particular behavior of the EVM. Tests are usually run for multiple forks and the result of execution may vary between forks.
-See <a href="https://eest.ethereum.org/v4.1.0/consuming_tests/state_test/">docs</a>.</p>
+See <a href="https://steel.ethereum.foundation/docs/execution-specs/mainnet/running_tests/test_formats/state_test/">docs</a>.</p>
 <p>To run the test first:</p>
 <pre><code class="language-sh">cd tooling/ef_tests/state
 </code></pre>
@@ -8974,7 +8974,7 @@ See <a href="https://eest.ethereum.org/v4.1.0/consuming_tests/state_test/">docs<
 </code></pre>
 <h3 id="blockchain-tests"><a class="header" href="#blockchain-tests">Blockchain tests</a></h3>
 <p>The blockchain tests test block validation and the consensus rules of the Ethereum blockchain. Tests are usually run for multiple forks.
-See <a href="https://eest.ethereum.org/v4.1.0/consuming_tests/blockchain_test">docs</a>.</p>
+See <a href="https://steel.ethereum.foundation/docs/execution-specs/mainnet/running_tests/test_formats/blockchain_test/">docs</a>.</p>
 <p>To run the tests first:</p>
 <pre><code class="language-sh">cd tooling/ef_tests/blockchain
 </code></pre>
@@ -10476,12 +10476,12 @@ Options:
 Node options:
       --network &lt;GENESIS_FILE_PATH&gt;
           Alternatively, the name of a known network can be provided instead to use its preset genesis file and include its preset bootnodes. The networks currently supported include sepolia, hoodi and mainnet. If not specified, defaults to mainnet.
-
+          
           [env: ETHREX_NETWORK=]
 
       --datadir &lt;DATABASE_DIRECTORY&gt;
           Base directory for the database. For public networks a subdirectory named after the network is appended (e.g. ~/.local/share/ethrex/mainnet). If the value is `memory`, the InMemory Engine is used instead.
-
+          
           [env: ETHREX_DATADIR=]
           [default: /home/runner/.local/share/ethrex]
 
@@ -10498,30 +10498,35 @@ Node options:
 
       --metrics
           Enable metrics collection and exposition
-
+          
           [env: ETHREX_METRICS=]
 
       --dev
           If set it will be considered as `true`. If `--network` is not specified, it will default to a custom local devnet. The Binary has to be built with the `dev` feature enabled.
-
+          
           [env: ETHREX_DEV=]
 
       --log.level &lt;LOG_LEVEL&gt;
           Possible values: info, debug, trace, warn, error
-
+          
           [env: ETHREX_LOG_LEVEL=]
           [default: INFO]
 
       --log.color &lt;LOG_COLOR&gt;
           Possible values: auto, always, never
-
+          
           [env: ETHREX_LOG_COLOR=]
           [default: auto]
 
       --no-migrate
           Do not migrate an existing database to the network-specific subdirectory.
-
+          
           [env: ETHREX_NO_MIGRATE=]
+
+      --skip-genesis-validation
+          Trust a pre-existing datadir's genesis instead of recomputing the genesis state root from the genesis alloc. Use only when booting against a database produced out-of-band (e.g. by a state generator) whose state root you vouch for; has no effect on a fresh datadir.
+          
+          [env: ETHREX_SKIP_GENESIS_VALIDATION=]
 
       --no-precompile-cache
           Disable the per-block precompile result cache (benchmarking only).
@@ -10545,29 +10550,29 @@ Node options:
 
       --log.dir &lt;LOG_DIR&gt;
           Directory to store log files.
-
+          
           [env: ETHREX_LOG_DIR=]
 
       --mempool.maxsize &lt;MEMPOOL_MAX_SIZE&gt;
           Maximum size of the mempool in number of transactions
-
+          
           [env: ETHREX_MEMPOOL_MAX_SIZE=]
           [default: 10000]
 
       --precompute-witnesses
           Once synced, computes execution witnesses upon receiving newPayload messages and stores them in local storage
-
+          
           [env: ETHREX_PRECOMPUTE_WITNESSES=]
 
 P2P options:
       --bootnodes &lt;BOOTNODE_LIST&gt;...
           Comma separated enode URLs for P2P discovery bootstrap.
-
+          
           [env: ETHREX_BOOTNODES=]
 
       --syncmode &lt;SYNC_MODE&gt;
           Can be either "full" or "snap" with "snap" as default value.
-
+          
           [env: ETHREX_SYNCMODE=]
           [default: snap]
 
@@ -10576,126 +10581,137 @@ P2P options:
 
       --p2p.addr &lt;ADDRESS&gt;
           The address to bind P2P sockets to. Defaults to the local IP. Use 0.0.0.0 (IPv4) or :: (IPv6) to listen on all interfaces. See also --nat.extip to announce a different external address.
-
+          
           [env: ETHREX_P2P_ADDR=]
 
       --nat.extip &lt;IP&gt;
           The IP address advertised to other nodes via discovery and ENR. Use this when the node is behind NAT and --p2p.addr is a private/unspecified address. Defaults to the value of --p2p.addr (or the auto-detected local IP if neither is set).
-
+          
           [env: ETHREX_P2P_NAT_EXTIP=]
 
       --p2p.port &lt;PORT&gt;
           TCP port for the P2P protocol.
-
+          
           [env: ETHREX_P2P_PORT=]
           [default: 30303]
 
       --discovery.port &lt;PORT&gt;
           UDP port for P2P discovery.
-
+          
           [env: ETHREX_P2P_DISCOVERY_PORT=]
           [default: 30303]
 
       --p2p.discv4 &lt;DISCV4_ENABLED&gt;
           Enable discv4 discovery.
-
+          
           [default: true]
           [possible values: true, false]
 
       --p2p.discv5 &lt;DISCV5_ENABLED&gt;
           Enable discv5 discovery.
-
+          
           [default: true]
           [possible values: true, false]
 
       --p2p.tx-broadcasting-interval &lt;INTERVAL_MS&gt;
           Transaction Broadcasting Time Interval (ms) for batching transactions before broadcasting them.
-
+          
           [env: ETHREX_P2P_TX_BROADCASTING_INTERVAL=]
           [default: 1000]
 
       --p2p.target-peers &lt;MAX_PEERS&gt;
           Max amount of connected peers.
-
+          
           [env: ETHREX_P2P_TARGET_PEERS=]
           [default: 100]
 
       --p2p.lookup-interval &lt;INITIAL_LOOKUP_INTERVAL&gt;
           Initial Lookup Time Interval (ms) to trigger each Discovery lookup message and RLPx connection attempt.
-
+          
           [env: ETHREX_P2P_LOOKUP_INTERVAL=]
           [default: 100]
+
+Storage options:
+      --rocksdb.block-cache-size &lt;BYTES&gt;
+          RocksDB shared block cache size in bytes. With cache_index_and_filter_blocks enabled it holds data blocks plus the per-SST index and bloom-filter blocks, so it is the effective ceiling on RocksDB's resident memory.
+          
+          Default 12 GiB keeps the filter/index working set resident plus hot EVM state. A sweep on a synced mainnet node (32 GiB cap) found 8-16 GiB all keep up with head-following (filters resident, disk near-idle, no slow blocks); larger gives no gain because the OS page cache backstops the uncompressed state CFs, and ~8 GiB is the floor where the filter set starts to thrash.
+          
+          Lower only on memory-constrained hosts, accepting reduced throughput. ETHREX_ROCKSDB_BLOCK_CACHE_SIZE sets the same value.
+          
+          [env: ETHREX_ROCKSDB_BLOCK_CACHE_SIZE=]
+          [default: 12884901888]
 
 RPC options:
       --http.addr &lt;ADDRESS&gt;
           Listening address for the HTTP JSON-RPC server. Defaults to 127.0.0.1 so the endpoint is only reachable from localhost; pass 0.0.0.0 to bind on all interfaces (only recommended when the node sits behind a trusted firewall or reverse proxy).
-
+          
           [env: ETHREX_HTTP_ADDR=]
           [default: 127.0.0.1]
 
       --http.port &lt;PORT&gt;
           Listening port for the http rpc server.
-
+          
           [env: ETHREX_HTTP_PORT=]
           [default: 8545]
 
       --http.api &lt;NAMESPACES&gt;
           Comma-separated list of JSON-RPC namespaces exposed on the public HTTP and WebSocket endpoints. Defaults to `eth,net,web3`. Enable `admin`, `debug` or `txpool` only when needed; the `engine` namespace is served on the authenticated RPC port and cannot be toggled here.
-
+          
           [env: ETHREX_HTTP_API=]
           [default: eth,net,web3]
 
       --ws.enabled
           Enable websocket rpc server. Disabled by default.
-
+          
           [env: ETHREX_ENABLE_WS=]
 
       --ws.addr &lt;ADDRESS&gt;
           Listening address for the websocket rpc server.
-
+          
           [env: ETHREX_WS_ADDR=]
           [default: 0.0.0.0]
 
       --ws.port &lt;PORT&gt;
           Listening port for the websocket rpc server.
-
+          
           [env: ETHREX_WS_PORT=]
           [default: 8546]
 
       --authrpc.addr &lt;ADDRESS&gt;
           Listening address for the authenticated rpc server.
-
+          
           [env: ETHREX_AUTHRPC_ADDR=]
           [default: 127.0.0.1]
 
       --authrpc.port &lt;PORT&gt;
           Listening port for the authenticated rpc server.
-
+          
           [env: ETHREX_AUTHRPC_PORT=]
           [default: 8551]
 
       --authrpc.jwtsecret &lt;JWTSECRET_PATH&gt;
           Receives the jwt secret used for authenticated rpc requests.
-
+          
           [env: ETHREX_AUTHRPC_JWTSECRET_PATH=]
           [default: jwt.hex]
 
 Block building options:
       --builder.extra-data &lt;EXTRA_DATA&gt;
           Block extra data message.
-
+          
           [env: ETHREX_BUILDER_EXTRA_DATA=]
-          [default: "ethrex 13.0.0"]
+          [default: "ethrex 18.0.0"]
 
       --builder.gas-limit &lt;GAS_LIMIT&gt;
           Target block gas limit.
-
+          
           [env: ETHREX_BUILDER_GAS_LIMIT=]
           [default: 60000000]
 
       --builder.max-blobs &lt;MAX_BLOBS&gt;
           EIP-7872: Maximum blobs per block for local building. Minimum of 1. Defaults to protocol max.
-
+          
           [env: ETHREX_BUILDER_MAX_BLOBS=]
 </code></pre>
 <!-- END_CLI_HELP -->
@@ -10891,7 +10907,7 @@ Block building options:
           Block extra data message.
 
           [env: ETHREX_BUILDER_EXTRA_DATA=]
-          [default: "ethrex 13.0.0"]
+          [default: "ethrex 18.0.0"]
 
       --builder.gas-limit &lt;GAS_LIMIT&gt;
           Target block gas limit.
@@ -11210,7 +11226,7 @@ Prover client options:
 </ul>
 <h2 id="2nd---bump-version"><a class="header" href="#2nd---bump-version">2nd - Bump version</a></h2>
 <p>The version must be updated to <code>X.Y.Z</code> in the release branch. There are multiple <code>Cargo.toml</code> and <code>Cargo.lock</code> files that need to be updated.</p>
-<p>First, we need to update the version of the workspace package. You can find it in the <code>Cargo.toml</code> file in the root directory, under the <code>[workspace.package]</code> section.</p>
+<p>First, we need to update the version of the workspace package. You can find it in the <code>Cargo.toml</code> file in the root directory, under the <code>[workspace.package]</code> section. This is also the version the library crates are published under on crates.io when the release is finalized, so it must be a clean semver version (the <code>-rc.W</code> suffix lives only on the git tag).</p>
 <p>Then, we need to update five more <code>Cargo.toml</code> files that are not part of the workspace but fulfill the role of packages in the monorepo. These are located in the following paths:</p>
 <ul>
 <li><code>crates/guest-program/bin/sp1/Cargo.toml</code></li>
@@ -11267,6 +11283,17 @@ git push origin &lt;release_version&gt;
 </ul>
 <p>A changelog will be generated based on commit names (using conventional commits) from the last stable tag.</p>
 <h2 id="4th---test--publish-release"><a class="header" href="#4th---test--publish-release">4th - Test &amp; Publish Release</a></h2>
+<h3 id="testing-checklist"><a class="header" href="#testing-checklist">Testing checklist</a></h3>
+<p>Before publishing the release, run through the following checks using the pre-release binaries:</p>
+<ul>
+<li><input disabled="" type="checkbox"> Upgrade <code>ethrex-ethdocker-mainnet</code></li>
+<li><input disabled="" type="checkbox"> Upgrade <code>ethrex-mainnet-1</code></li>
+<li><input disabled="" type="checkbox"> Upgrade <code>ethrex-minimum-mainnet</code></li>
+<li><input disabled="" type="checkbox"> Launch multisync on <code>ethrex-multisync-main</code></li>
+<li><input disabled="" type="checkbox"> Upgrade a local L2 created with the previous version and run the integration tests</li>
+<li><input disabled="" type="checkbox"> Run the L2 integration tests with a SP1 prover on the GPU server (<code>l2-gpu</code>)</li>
+</ul>
+<h3 id="publish"><a class="header" href="#publish">Publish</a></h3>
 <p>Once the pre-release is created and you want to publish the release, go to the <a href="https://github.com/lambdaclass/ethrex/releases">release page</a> and follow the next steps:</p>
 <ol>
 <li>
@@ -11282,6 +11309,29 @@ git push origin &lt;release_version&gt;
 <p><img src="img/publish_release_step_3.png" alt="edit title"></p>
 </li>
 <li>
+<p>Customize the release notes.</p>
+<p>The auto-generated changelog lists every commit, but it doesn’t tell operators what actually matters in this release. Above the auto-generated changelog, add a hand-written summary using <a href="https://docs.github.com/en/get-started/writing-on-github/getting-started-with-writing-and-formatting-on-github/basic-writing-and-formatting-syntax#alerts">GitHub alerts</a>. Pick boxes by what the operator needs to decide, in this order:</p>
+<ul>
+<li><code>&gt; [!IMPORTANT]</code> — <strong>only</strong> when the release carries critical security or correctness fixes. One line stating that upgrading is strongly recommended for all operators.</li>
+<li><code>&gt; [!WARNING]</code> — <strong>only</strong> when the upgrade can’t be cleanly undone or carries a breaking change the operator must account for: a database schema migration you can’t roll back from, a required resync, removed or renamed CLI flags / config options, changed defaults, breaking RPC/API changes, or new minimum requirements (disk, dependency, consensus-client version). State what changes and what the operator must do.</li>
+<li><code>&gt; [!NOTE]</code> — <strong>always</strong>. A <strong>What’s new</strong> list of the highlights (new features, important fixes), plus a line saying whether a resync is needed (if not already covered above).</li>
+</ul>
+<p>Keep the space after <code>&gt;</code> (<code>&gt; [!NOTE]</code>, not <code>&gt;[!NOTE]</code>) and leave a blank line between boxes so each renders separately. Drop the <code>[!IMPORTANT]</code> / <code>[!WARNING]</code> boxes when they don’t apply — a routine release needs only the <code>[!NOTE]</code>.</p>
+<pre><code class="language-markdown">&gt; [!IMPORTANT]
+&gt; This release contains critical fixes. Upgrading is strongly recommended for all operators.
+
+&gt; [!WARNING]
+&gt; This release changes the database schema; once you upgrade you can't roll back to a previous version. The migration runs automatically.
+
+&gt; [!NOTE]
+&gt; **What's new**
+&gt; - &lt;highlight&gt;
+&gt; - &lt;highlight&gt;
+&gt;
+&gt; No resync is needed.
+</code></pre>
+</li>
+<li>
 <p>Set the release as the latest release (you will need to uncheck the pre-release first). And finally, click on <code>Update release</code></p>
 <p><img src="img/publish_release_step_4.png" alt="set latest release"></p>
 </li>
@@ -11291,6 +11341,21 @@ git push origin &lt;release_version&gt;
 <li><code>ghcr.io/lambdaclass/ethrex:X.Y.Z</code>, <code>ghcr.io/lambdaclass/ethrex:latest</code></li>
 <li><code>ghcr.io/lambdaclass/ethrex:X.Y.Z-l2</code>, <code>ghcr.io/lambdaclass/ethrex:l2</code></li>
 </ul>
+<p>Promoting the pre-release to a full release also publishes ethrex’s library crates to crates.io — see the next section.</p>
+<h3 id="publishing-to-cratesio"><a class="header" href="#publishing-to-cratesio">Publishing to crates.io</a></h3>
+<p>Promoting the pre-release to a full release (the <code>released</code> event from the step above) triggers the <code>publish.yml</code> workflow, which runs <code>cargo publish</code> for ethrex’s publishable library crates in dependency order, at the workspace version <code>X.Y.Z</code>.</p>
+<blockquote class="blockquote-tag blockquote-tag-note">
+<p class="blockquote-tag-title"><svg viewbox="0 0 16 16" width="18" height="18"><path d="M0 8a8 8 0 1 1 16 0A8 8 0 0 1 0 8Zm8-6.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13ZM6.5 7.75A.75.75 0 0 1 7.25 7h1a.75.75 0 0 1 .75.75v2.75h.25a.75.75 0 0 1 0 1.5h-2a.75.75 0 0 1 0-1.5h.25v-2h-.25a.75.75 0 0 1-.75-.75ZM8 6a1 1 0 1 1 0-2 1 1 0 0 1 0 2Z"></path></svg>Note</p>
+<p>Only the <strong>final</strong> release publishes to crates.io. Pre-release (<code>vX.Y.Z-rc.W</code>) tags do <strong>not</strong>: the <code>released</code> event does not fire for pre-releases, and crates.io versions are immutable, so a release candidate must never claim the version before it has been tested.</p>
+</blockquote>
+<p>The crates are published at the <code>[workspace.package].version</code> bumped in step 2; the <code>-rc.W</code> suffix lives only on the git tag and never reaches crates.io.</p>
+<p>This requires a one-time organizational setup before the first release that publishes:</p>
+<ul>
+<li>A <code>CRATES_IO_TOKEN</code> repository secret with publish rights for the crates.</li>
+<li>A <code>crates-release-prod</code> GitHub environment (the workflow runs inside it).</li>
+<li>crates.io ownership of the crate names (the first publish under the token claims them).</li>
+</ul>
+<p>The workflow is idempotent: a crate version already on crates.io is skipped, so re-running after a partial failure is safe. To validate without publishing, run it manually from the Actions tab (the <code>workflow_dispatch</code> trigger) with the dry-run input checked — it lists each crate’s package contents instead of publishing.</p>
 <h2 id="5th---update-homebrew"><a class="header" href="#5th---update-homebrew">5th - Update Homebrew</a></h2>
 <p>Disclaimer: We should automate this</p>
 <ol>
@@ -11350,7 +11415,7 @@ xattr -dr com.apple.quarantine ethrex
 <p>If hotfixes are needed before the final release, commit them to <code>release/vX.Y.Z</code>, push, and create a new pre-release tag. The final tag <code>vX.Y.Z</code> should always point to the exact commit you will merge via PR.</p>
 <h2 id="troubleshooting-5"><a class="header" href="#troubleshooting-5">Troubleshooting</a></h2>
 <h3 id="failure-on-latest-release-workflow"><a class="header" href="#failure-on-latest-release-workflow">Failure on “latest release” workflow</a></h3>
-<p>If the CI fails when setting a release as latest (step 4), Docker tags <code>latest</code> and <code>l2</code> may not be updated. To manually push those changes, follow these steps:</p>
+<p>If the CI fails when setting a release as latest (step 5), Docker tags <code>latest</code> and <code>l2</code> may not be updated. To manually push those changes, follow these steps:</p>
 <ul>
 <li>Create a new Github Personal Access Token (PAT) from the <a href="https://github.com/settings/tokens/new">settings</a>.</li>
 <li>Check <code>write:packages</code> permission (this will auto-check <code>repo</code> permissions too), give a name and a short expiration time.</li>
@@ -11381,6 +11446,8 @@ docker push ghcr.io/lambdaclass/ethrex:l2
 <ul>
 <li>Delete the PAT for security (<a href="https://github.com/settings/tokens">here</a>)</li>
 </ul>
+<h3 id="failure-on-the-cratesio-publish-workflow"><a class="header" href="#failure-on-the-cratesio-publish-workflow">Failure on the crates.io publish workflow</a></h3>
+<p>If <code>publish.yml</code> fails partway through, fix the cause and re-run the workflow. Crates already published at the release version are skipped (the run tolerates an “already exists” error), so it resumes from the first crate that has not been published yet. Because crates are published in dependency order, a metadata or ordering error in one crate blocks the crates that depend on it, while the ones published before it stay published (crates.io versions cannot be unpublished or overwritten — a fix requires a new version).</p>
 <div style="break-before: page; page-break-before: always;"></div><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.4/dist/katex.min.css">
 <h1 id="short-to-mid-term-roadmap"><a class="header" href="#short-to-mid-term-roadmap">Short– to Mid-Term Roadmap</a></h1>
 <p>This document represents the <strong>short- to mid-term roadmap</strong>.
